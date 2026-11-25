@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rechnungen Ferienwohnung</title>
+<style>
+:root{--c:#1f6f8b}*{box-sizing:border-box}body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f4f6f8;color:#222}
+header{background:var(--c);color:#fff;padding:10px 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}header h1{font-size:18px;margin:0 auto 0 0}
+button{background:var(--c);color:#fff;border:0;border-radius:6px;padding:9px 14px;font-size:15px;cursor:pointer}
+button.sec{background:#e3e8ec;color:#222}header button{background:#ffffff33}header button.on{background:#fff;color:var(--c)}
+main{max-width:860px;margin:16px auto;padding:0 12px}.card{background:#fff;border-radius:10px;padding:16px;margin-bottom:14px;box-shadow:0 1px 3px #0001}
+label{display:block;font-size:13px;color:#555;margin:10px 0 3px}input,select,textarea{width:100%;padding:9px;border:1px solid #c8d0d6;border-radius:6px;font-size:15px;font-family:inherit}
+textarea{min-height:90px;font-family:ui-monospace,Consolas,monospace;font-size:13px}.g{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+@media(max-width:600px){.g{grid-template-columns:1fr}}table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:6px 4px;border-bottom:1px solid #e5e9ec;text-align:left}
+.r{text-align:right}.err{color:#b00020;margin-top:8px}.ok{color:#17803d;margin-top:8px}.hint{font-size:13px;color:#777}.hidden{display:none}h2{margin:0 0 6px;font-size:17px}
+</style></head><body>
+<div id="login" class="card" style="max-width:380px;margin:60px auto"><h2>Anmeldung</h2>
+<label>E-Mail</label><input id="em" type="email" autocomplete="username"><label>Passwort</label><input id="pw" type="password" autocomplete="current-password">
+<p><button onclick="doLogin()">Anmelden</button></p><div id="lerr" class="err"></div></div>
+<div id="app" class="hidden"><header><h1>Ferienwohnung Rechnungen</h1>
+<button id="t_new" onclick="tab('new')">Neue Rechnung</button><button id="t_list" onclick="tab('list')">Rechnungen</button>
+<button id="t_set" onclick="tab('set')">Einstellungen</button><button onclick="logout()">Abmelden</button></header><main>
+<section id="new"><div class="card"><h2>Gast</h2><div class="g">
+<div><label>Anrede</label><select id="anrede"><option>Herr</option><option>Frau</option><option>Firma</option></select></div>
+<div><label>Name / Firma</label><input id="gname"></div><div><label>Straße</label><input id="gstr"></div><div><label>PLZ Ort</label><input id="gort"></div></div></div>
+<div class="card"><h2>Aufenthalt</h2><div class="g"><div><label>Anreise</label><input type="date" id="von"></div><div><label>Abreise</label><input type="date" id="bis"></div></div>
+<div id="extras" class="g"></div><label>Rabatte (Mehrfachauswahl möglich)</label><select id="rabatte" multiple size="4"></select>
+<div class="g"><div><label>Freier Rabatt in %</label><input id="rfrei" type="number" min="0" max="100" step="0.5" value="0"></div>
+<div><label>&nbsp;</label><label style="margin:0"><input type="checkbox" id="kurz" style="width:auto"> Zuschlag Kurzaufenthalt</label></div></div></div>
+<div class="card"><h2>Vorschau</h2><div id="preview" class="hint">Bitte Zeitraum wählen.</div>
+<p><button onclick="createInvoice()">Rechnung erstellen (PDF)</button></p><div id="nmsg"></div></div></section>
+<section id="list" class="hidden"><div class="card"><h2>Erstellte Rechnungen</h2><p><button class="sec" onclick="exportCsv()">CSV für Excel</button></p>
+<div style="overflow:auto"><table id="ltab"></table></div></div></section>
+<section id="set" class="hidden"><div class="card"><h2>Einstellungen</h2><div id="sform"></div><p><button onclick="saveSettings()">Speichern</button></p><div id="smsg"></div></div></section>
+</main></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="config.js"></script><script src="logo.js"></script><script src="app.js"></script></body></html>
