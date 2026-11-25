@@ -43,8 +43,11 @@ const uebern = r2(pos.reduce((s, p) => s + p[3], 0));
 const ein = [["Endreinigung", 1, CFG.einmalig.Endreinigung, CFG.einmalig.Endreinigung]];
 for (const [k, a] of Object.entries(einm)) if (a > 0) ein.push([k, a, CFG.einmalig[k], a * CFG.einmalig[k]]);
 const zusatz = r2(ein.reduce((s, e) => s + e[3], 0)), gesamt = r2(uebern + zusatz), z = CFG.zahlung;
-const anz = r2(gesamt * z.anzahlung_prozent / 100), restDatum = addDays(von, -z.rest_vor_anreise_tage);
-return {n, pos, uebern, ein, zusatz, gesamt, anz, rest: r2(gesamt - anz), restDatum, vollSofort: restDatum <= addDays(rdatum, z.anzahlung_frist_tage)};
+const anz = r2(gesamt * z.anzahlung_prozent / 100);
+const vollSofort = !(von > addDays(rdatum, z.anzahlung_ab_tage == null ? 14 : z.anzahlung_ab_tage));
+const r1 = addDays(von, -z.rest_vor_anreise_tage), r2d = addDays(rdatum, z.anzahlung_frist_tage);
+const restDatum = r1 > r2d ? r1 : r2d;
+return {n, pos, uebern, ein, zusatz, gesamt, anz, rest: r2(gesamt - anz), restDatum, vollSofort};
 }
 async function doLogin() {
 $("lerr").textContent = "";
@@ -87,7 +90,8 @@ try {
 const f = readForm(), r = calc(pd($("von").value), pd($("bis").value), f.extras, f.einm, f.rab, f.rfrei, f.kurz, new Date());
 el.innerHTML = "<table>" + r.pos.map(row4).join("") + r.ein.map(row4).join("") +
 "<tr><th>Gesamt (" + r.n + ' Nächte)</th><th></th><th></th><th class="r">' + eur(r.gesamt) + "</th></tr>" +
-"<tr><td>" + (r.vollSofort ? "Sofort fällig" : "Anzahlung " + CFG.zahlung.anzahlung_prozent + " %") + '</td><td></td><td></td><td class="r">' + eur(r.vollSofort ? r.gesamt : r.anz) + "</td></tr></table>";
+"<tr><td>" + (r.vollSofort ? "Gesamtbetrag, sofort fällig" : "Anzahlung " + CFG.zahlung.anzahlung_prozent + " %, fällig bei Buchung") + '</td><td></td><td></td><td class="r">' + eur(r.vollSofort ? r.gesamt : r.anz) + "</td></tr>" +
+(r.vollSofort ? "" : "<tr><td>Restbetrag, fällig bis " + dstr(r.restDatum) + '</td><td></td><td></td><td class="r">' + eur(r.rest) + "</td></tr>") + "</table>";
 } catch (e) { el.innerHTML = '<span class="err">' + e.message + "</span>"; }
 }
 function fmtNr(jahr, lfd) {
@@ -104,7 +108,7 @@ const nr = fmtNr(jahr, lfd);
 const gast = {anrede: $("anrede").value, name, strasse: $("gstr").value.trim(), ort: $("gort").value.trim()};
 const {error: e2} = await sb.from("invoices").insert({nr, jahr, lfd, rechnungsdatum: iso(heute), gast, von: iso(von), bis: iso(bis), naechte: r.n,
 daten: {positionen: r.pos, einmalig: r.ein, uebernachtung: r.uebern, zusatz: r.zusatz, voll_sofort: r.vollSofort},
-gesamt: r.gesamt, anzahlung: r.vollSofort ? r.gesamt : r.anz, restzahlung: r.vollSofort ? 0 : r.rest, rest_zahlbar_bis: iso(r.restDatum)});
+gesamt: r.gesamt, anzahlung: r.vollSofort ? r.gesamt : r.anz, restzahlung: r.vollSofort ? 0 : r.rest, rest_zahlbar_bis: r.vollSofort ? null : iso(r.restDatum)});
 if (e2) throw e2;
 makePdf(gast, von, bis, r, nr, heute);
 msg.className = "ok"; msg.textContent = "Rechnung " + nr + " erstellt.";
@@ -143,11 +147,14 @@ doc.line(L, y - 3.5, R, y - 3.5); line("Übernachtungspreis", "", "", eur(r.uebe
 head("Einmalige Kosten", "Anzahl", "Einzelpreis", "Gesamt");
 r.ein.forEach(p => line(p[0], p[1], eur(p[2]), eur(p[3])));
 line("Zusatzkosten", "", "", eur(r.zusatz), true); doc.line(L, y - 3.5, R, y - 3.5);
-line("Gesamtrechnungsbetrag", "", "", eur(r.gesamt), true); y += 1;
+line("Gesamtrechnungsbetrag", "", "", eur(r.gesamt), true);
+if (r.vollSofort) line("Zahlbetrag (sofort fällig)", "", "", eur(r.gesamt), true);
+else { line("Anzahlung " + z.anzahlung_prozent + " % (fällig bei Buchung)", "", "", eur(r.anz), true); line("Restbetrag (fällig bis " + dstr(r.restDatum) + ")", "", "", eur(r.rest)); }
+y += 1;
 doc.setFontSize(8).setTextColor(120).text(C.hinweis_steuer, L, y); doc.setTextColor(0).setFontSize(10); y += 6;
 const pay = r.vollSofort
 ? "Bitte überweisen Sie den Gesamtbetrag von " + eur(r.gesamt) + " innerhalb von " + z.anzahlung_frist_tage + " Tagen nach Erhalt dieser Rechnung (spätestens vor Anreise) auf das unten genannte Bankkonto."
-: "Bei Buchung fällig: " + z.anzahlung_prozent + " % Anzahlung = " + eur(r.anz) + ". Bitte überweisen Sie den Anzahlungsbetrag innerhalb von " + z.anzahlung_frist_tage + " Tagen nach Erhalt dieser Rechnung auf das unten genannte Bankkonto. Der Restbetrag in Höhe von " + eur(r.rest) + " ist " + z.rest_vor_anreise_tage + " Tage vor Anreise (bis " + dstr(r.restDatum) + ") zu zahlen.";
+: "Bei Buchung fällig: " + z.anzahlung_prozent + " % Anzahlung = " + eur(r.anz) + ". Bitte überweisen Sie den Anzahlungsbetrag innerhalb von " + z.anzahlung_frist_tage + " Tagen nach Erhalt dieser Rechnung auf das unten genannte Bankkonto. Der Restbetrag in Höhe von " + eur(r.rest) + " ist bis zum " + dstr(r.restDatum) + " zu zahlen.";
 const pl = doc.splitTextToSize(pay, R - L); doc.text(pl, L, y); y += pl.length * 4.8 + 4;
 const bank = [["Bank:", z.bank], ["Kontoinhaber:", z.kontoinhaber], ["IBAN:", z.iban], ["BIC:", z.bic]]; if (z.paypal) bank.push(["oder PayPal:", z.paypal]);
 doc.rect(L, y - 4, 110, bank.length * 5.2 + 2); bank.forEach(([a, b], i) => { doc.text(a, L + 2, y + i * 5.2); doc.text(b, L + 35, y + i * 5.2); }); y += bank.length * 5.2 + 6;
@@ -192,7 +199,7 @@ ta("s_ein", "Einmalige Kosten (Name = Preis, Endreinigung muss vorhanden sein)",
 H("Rabatte") + ta("s_rab", "Eine pro Zeile: Name | art (prozent, pro_nacht, pauschal) | Wert | min. Nächte | automatisch (ja/nein) | Zeitraum von | bis (optional, TT.MM.)",
 (C.rabatte || []).map(r => [r.name, r.art, r.wert, r.min_naechte || 0, r.automatisch ? "ja" : "nein", r.zeitraum_von || "", r.zeitraum_bis || ""].join(" | ")).join(NL)) +
 H("Zahlung") + '<div class="g">' + f("s_bank", "Bank", z.bank) + f("s_inh", "Kontoinhaber", z.kontoinhaber) + f("s_iban", "IBAN", z.iban) + f("s_bic", "BIC", z.bic) + f("s_pp", "PayPal", z.paypal) +
-f("s_ap", "Anzahlung in %", z.anzahlung_prozent) + f("s_af", "Frist Anzahlung (Tage)", z.anzahlung_frist_tage) + f("s_rv", "Restzahlung X Tage vor Anreise", z.rest_vor_anreise_tage) + "</div>" +
+f("s_ap", "Anzahlung in %", z.anzahlung_prozent) + f("s_am", "Anzahlung nur, wenn Anreise mehr als X Tage entfernt", z.anzahlung_ab_tage == null ? 14 : z.anzahlung_ab_tage) + f("s_af", "Frist Anzahlung (Tage)", z.anzahlung_frist_tage) + f("s_rv", "Restzahlung X Tage vor Anreise", z.rest_vor_anreise_tage) + "</div>" +
 H("Stornierung") + f("s_stei", "Einleitungstext", C.storno_einleitung) + ta("s_sto", "Regeln (eine pro Zeile: Zeitraum | Kosten)", C.storno.map(s => s.join(" | ")).join(NL)) +
 H("Vermieter und Wohnung") + '<div class="g">' + f("s_vn", "Name", v.name) + f("s_vs", "Straße", v.strasse) + f("s_vo", "PLZ Ort", v.ort) + f("s_vt", "Telefon", v.telefon) + f("s_vm", "Mobil", v.mobil) + f("s_ve", "E-Mail", v.email) +
 f("s_wb", "Name Ferienwohnung", w.bezeichnung) + f("s_wa", "Adresse Ferienwohnung", w.adresse) + f("s_an", "Anreise ab", w.anreise_zeit) + f("s_ab", "Abreise bis", w.abreise_zeit) + "</div>" +
@@ -220,7 +227,7 @@ const nc = Object.assign({}, CFG, {
 standard: {name: "Standard", preis: num("s_std")}, uebernachtung_text: $("s_ues").value, saisons,
 zuschlaege_pro_nacht: pairs($("s_zus").value), einmalig: ein, kurzaufenthalt: {max_naechte: num("s_kn"), zuschlag: num("s_kz")}, rabatte,
 zahlung: {bank: $("s_bank").value, kontoinhaber: $("s_inh").value, iban: $("s_iban").value, bic: $("s_bic").value, paypal: $("s_pp").value,
-anzahlung_prozent: num("s_ap"), anzahlung_frist_tage: num("s_af"), rest_vor_anreise_tage: num("s_rv")},
+anzahlung_prozent: num("s_ap"), anzahlung_ab_tage: num("s_am"), anzahlung_frist_tage: num("s_af"), rest_vor_anreise_tage: num("s_rv")},
 storno_einleitung: $("s_stei").value, storno: lines($("s_sto").value).map(l => l.split("|").map(s => s.trim())),
 vermieter: {name: $("s_vn").value, strasse: $("s_vs").value, ort: $("s_vo").value, telefon: $("s_vt").value, mobil: $("s_vm").value, email: $("s_ve").value},
 wohnung: {bezeichnung: $("s_wb").value, adresse: $("s_wa").value, anreise_zeit: $("s_an").value, abreise_zeit: $("s_ab").value},
