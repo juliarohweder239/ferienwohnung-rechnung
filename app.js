@@ -12,6 +12,7 @@ const md = s => { const [t, m] = s.trim().replace(/[.]$/, "").split("."); return
 const cmp = (a, b) => a[0] - b[0] || a[1] - b[1];
 const r2 = x => Math.round((x + Number.EPSILON) * 100) / 100;
 const nn = n => n === 1 ? "Nacht" : "Nächte";
+const webOf = v => v.website == null ? "www.ferienwohnung-rohweder.de" : v.website;
 function inRange(d, von, bis) {
 const x = [d.getMonth() + 1, d.getDate()], a = md(von), b = md(bis);
 return cmp(a, b) <= 0 ? (cmp(x, a) >= 0 && cmp(x, b) < 0) : (cmp(x, a) >= 0 || cmp(x, b) < 0);
@@ -128,13 +129,13 @@ msg.className = "ok"; msg.textContent = "Rechnung " + nr + " erstellt.";
 }
 function makePdf(g, von, bis, r, nr, datum, opt) {
 const {jsPDF} = window.jspdf, doc = new jsPDF({unit: "mm", format: "a4"}), C = CFG, v = C.vermieter, w = C.wohnung, z = C.zahlung, L = 20, R = 190, BOT = 272;
-const paid = opt && opt.paid, link = opt && opt.link;
+const paid = opt && opt.paid, link = opt && opt.link, web = webOf(v);
 let y = 14;
 const room = h => { if (y + h > BOT) { doc.addPage(); y = 20; } };
 const lh = 60 * window.LOGO_H / window.LOGO_W;
 doc.addImage(window.LOGO, "PNG", L, y, 60, lh); y += lh + 6;
 doc.setFontSize(8).setTextColor(120).text(v.name + " | " + v.strasse + " | " + v.ort, L, y); doc.setTextColor(0).setFontSize(10); y += 6;
-const emp = [g.anrede, g.name, g.strasse, g.ort].filter(Boolean), ab = [v.name, v.strasse, v.ort, "Tel. " + v.telefon, "Mobil " + v.mobil, v.email];
+const emp = [g.anrede, g.name, g.strasse, g.ort].filter(Boolean), ab = [v.name, v.strasse, v.ort, "Tel. " + v.telefon, "Mobil " + v.mobil, v.email, web].filter(Boolean);
 emp.forEach((t, i) => doc.text(t, L, y + i * 5)); ab.forEach((t, i) => doc.text(t, 125, y + i * 5)); y += Math.max(emp.length, ab.length) * 5 + 20;
 doc.setFont("helvetica", "bold").setFontSize(14).text("Buchungsbestätigung & Rechnung", L, y); y += 9;
 doc.setFontSize(10).text("Rechnungsnummer: " + nr, L, y); doc.setFont("helvetica", "normal").text("Datum: " + dstr(datum), 125, y); y += 9;
@@ -200,8 +201,8 @@ if (hn.length) { y += 3; doc.text(hn, L, y); }
 const N = doc.getNumberOfPages();
 for (let i = 1; i <= N; i++) {
 doc.setPage(i); doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(120);
-doc.text(doc.splitTextToSize([w.bezeichnung, w.adresse, "Tel. " + v.telefon, v.email].filter(Boolean).join(" · "), R - L), 105, 280, {align: "center"});
-doc.text(C.hinweis_steuer, 105, 285, {align: "center"});
+doc.text(doc.splitTextToSize([w.bezeichnung, w.adresse, "Tel. " + v.telefon, v.email, web].filter(Boolean).join(" · "), R - L), 105, 280, {align: "center"});
+doc.text(C.hinweis_steuer, 105, 286, {align: "center"});
 doc.text("Seite " + i + " von " + N, R, 291, {align: "right"});
 }
 doc.save(nr + ".pdf");
@@ -241,7 +242,7 @@ H("Rabatte") + ta("s_rab", "Eine pro Zeile: Name | art (prozent, pro_nacht, paus
 H("Zahlung") + '<div class="g">' + f("s_bank", "Bank", z.bank) + f("s_inh", "Kontoinhaber", z.kontoinhaber) + f("s_iban", "IBAN", z.iban) + f("s_bic", "BIC", z.bic) +
 f("s_ap", "Anzahlung in %", z.anzahlung_prozent) + f("s_am", "Anzahlung nur, wenn Anreise mehr als X Tage entfernt", z.anzahlung_ab_tage == null ? 14 : z.anzahlung_ab_tage) + f("s_af", "Frist Anzahlung (Tage)", z.anzahlung_frist_tage) + f("s_rv", "Restzahlung X Tage vor Anreise", z.rest_vor_anreise_tage) + "</div>" +
 H("Stornierung") + f("s_stei", "Einleitungstext", C.storno_einleitung) + ta("s_sto", "Regeln (eine pro Zeile: Zeitraum | Kosten)", C.storno.map(s => s.join(" | ")).join(NL)) + f("s_sth", "Hinweis unter den Regeln", C.storno_hinweis) +
-H("Vermieter und Wohnung") + '<div class="g">' + f("s_vn", "Name", v.name) + f("s_vs", "Straße", v.strasse) + f("s_vo", "PLZ Ort", v.ort) + f("s_vt", "Telefon", v.telefon) + f("s_vm", "Mobil", v.mobil) + f("s_ve", "E-Mail", v.email) +
+H("Vermieter und Wohnung") + '<div class="g">' + f("s_vn", "Name", v.name) + f("s_vs", "Straße", v.strasse) + f("s_vo", "PLZ Ort", v.ort) + f("s_vt", "Telefon", v.telefon) + f("s_vm", "Mobil", v.mobil) + f("s_ve", "E-Mail", v.email) + f("s_vw", "Website", webOf(v)) +
 f("s_wb", "Name Ferienwohnung", w.bezeichnung) + f("s_wa", "Adresse Ferienwohnung", w.adresse) + f("s_an", "Anreise ab", w.anreise_zeit) + f("s_ab", "Abreise bis", w.abreise_zeit) + "</div>" +
 f("s_tax", "Steuerhinweis", C.hinweis_steuer) + f("s_nrf", "Rechnungsnummer-Format ({jahr}, {lfd:03d})", C.rechnungsnummer_format);
 }
@@ -269,7 +270,7 @@ zuschlaege_pro_nacht: pairs($("s_zus").value), einmalig: ein, kurzaufenthalt: {m
 zahlung: {bank: $("s_bank").value, kontoinhaber: $("s_inh").value, iban: $("s_iban").value, bic: $("s_bic").value,
 anzahlung_prozent: num("s_ap"), anzahlung_ab_tage: num("s_am"), anzahlung_frist_tage: num("s_af"), rest_vor_anreise_tage: num("s_rv")},
 storno_einleitung: $("s_stei").value, storno: lines($("s_sto").value).map(l => l.split("|").map(s => s.trim())), storno_hinweis: $("s_sth").value,
-vermieter: {name: $("s_vn").value, strasse: $("s_vs").value, ort: $("s_vo").value, telefon: $("s_vt").value, mobil: $("s_vm").value, email: $("s_ve").value},
+vermieter: {name: $("s_vn").value, strasse: $("s_vs").value, ort: $("s_vo").value, telefon: $("s_vt").value, mobil: $("s_vm").value, email: $("s_ve").value, website: $("s_vw").value},
 wohnung: {bezeichnung: $("s_wb").value, adresse: $("s_wa").value, anreise_zeit: $("s_an").value, abreise_zeit: $("s_ab").value},
 hinweis_steuer: $("s_tax").value, rechnungsnummer_format: $("s_nrf").value});
 const {error} = await sb.from("settings").update({config: nc, updated_at: new Date().toISOString()}).eq("id", 1); if (error) throw error;
