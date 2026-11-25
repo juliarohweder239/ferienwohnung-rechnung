@@ -11,6 +11,7 @@ const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 
 const md = s => { const [t, m] = s.trim().replace(/[.]$/, "").split("."); return [Number(m), Number(t)]; };
 const cmp = (a, b) => a[0] - b[0] || a[1] - b[1];
 const r2 = x => Math.round((x + Number.EPSILON) * 100) / 100;
+const nn = n => n === 1 ? "Nacht" : "Nächte";
 function inRange(d, von, bis) {
 const x = [d.getMonth() + 1, d.getDate()], a = md(von), b = md(bis);
 return cmp(a, b) <= 0 ? (cmp(x, a) >= 0 && cmp(x, b) < 0) : (cmp(x, a) >= 0 || cmp(x, b) < 0);
@@ -19,14 +20,15 @@ function seasonFor(d) {
 for (const s of CFG.saisons) if (s.zeitraeume.some(z => inRange(d, z.von, z.bis))) return [s.name, s.preis];
 return [CFG.standard.name, CFG.standard.preis];
 }
+// Positionen: [Name, Menge, Einzelpreis, Gesamt, Berechnungstext]
 function calc(von, bis, extras, einm, rabNames, rfrei, kurz, rdatum) {
 const n = Math.round((bis - von) / 864e5);
 if (!(n >= 1)) throw new Error("Abreise muss nach Anreise liegen.");
 const gr = {};
 for (let i = 0; i < n; i++) { const [nm, p] = seasonFor(addDays(von, i)); (gr[nm] = gr[nm] || {n: 0, p}).n++; }
-const pos = Object.entries(gr).map(([nm, g]) => [CFG.uebernachtung_text.replace("{name}", nm), g.n, g.p, g.n * g.p]);
-for (const [k, a] of Object.entries(extras)) if (a > 0) { const p = CFG.zuschlaege_pro_nacht[k]; pos.push([k, a, p * n, a * p * n]); }
-if (kurz && n <= CFG.kurzaufenthalt.max_naechte) pos.push(["Zuschlag Kurzaufenthalt", 1, CFG.kurzaufenthalt.zuschlag, CFG.kurzaufenthalt.zuschlag]);
+const pos = Object.entries(gr).map(([nm, g]) => [CFG.uebernachtung_text.replace("{name}", nm), g.n, g.p, g.n * g.p, g.n + " " + nn(g.n) + " × " + eur(g.p)]);
+for (const [k, a] of Object.entries(extras)) if (a > 0) { const p = CFG.zuschlaege_pro_nacht[k]; pos.push([k, a, p * n, a * p * n, a + " × " + n + " " + nn(n) + " × " + eur(p)]); }
+if (kurz && n <= CFG.kurzaufenthalt.max_naechte) pos.push(["Zuschlag Kurzaufenthalt", 1, CFG.kurzaufenthalt.zuschlag, CFG.kurzaufenthalt.zuschlag, "pauschal"]);
 const basis = pos.reduce((s, p) => s + p[3], 0);
 for (const r of CFG.rabatte || []) {
 const gew = rabNames.includes(r.name);
@@ -34,14 +36,14 @@ if (!(gew || r.automatisch)) continue;
 let ok = n >= (r.min_naechte || 0);
 if (ok && r.zeitraum_von && r.zeitraum_bis) ok = inRange(von, r.zeitraum_von, r.zeitraum_bis);
 if (!ok) { if (gew) throw new Error("Rabatt " + r.name + " gilt für diesen Aufenthalt nicht."); continue; }
-if (r.art === "prozent") { const b = -r2(basis * r.wert / 100); pos.push([r.name, 1, b, b]); }
-else if (r.art === "pro_nacht") pos.push([r.name, n, -r.wert, -r.wert * n]);
-else pos.push([r.name, 1, -r.wert, -r.wert]);
+if (r.art === "prozent") { const b = -r2(basis * r.wert / 100); pos.push([r.name, 1, b, b, r.wert + " % auf " + eur(basis)]); }
+else if (r.art === "pro_nacht") pos.push([r.name, n, -r.wert, -r.wert * n, n + " " + nn(n) + " × " + eur(-r.wert)]);
+else pos.push([r.name, 1, -r.wert, -r.wert, "pauschal"]);
 }
-if (rfrei > 0) { const b = -r2(basis * rfrei / 100); pos.push([rfrei + " % Rabatt", 1, b, b]); }
+if (rfrei > 0) { const b = -r2(basis * rfrei / 100); pos.push([rfrei + " % Rabatt", 1, b, b, rfrei + " % auf " + eur(basis)]); }
 const uebern = r2(pos.reduce((s, p) => s + p[3], 0));
-const ein = [["Endreinigung", 1, CFG.einmalig.Endreinigung, CFG.einmalig.Endreinigung]];
-for (const [k, a] of Object.entries(einm)) if (a > 0) ein.push([k, a, CFG.einmalig[k], a * CFG.einmalig[k]]);
+const ein = [["Endreinigung", 1, CFG.einmalig.Endreinigung, CFG.einmalig.Endreinigung, "einmalig"]];
+for (const [k, a] of Object.entries(einm)) if (a > 0) ein.push([k, a, CFG.einmalig[k], a * CFG.einmalig[k], a + " × " + eur(CFG.einmalig[k])]);
 const zusatz = r2(ein.reduce((s, e) => s + e[3], 0)), gesamt = r2(uebern + zusatz), z = CFG.zahlung;
 const anz = r2(gesamt * z.anzahlung_prozent / 100);
 const vollSofort = !(von > addDays(rdatum, z.anzahlung_ab_tage == null ? 14 : z.anzahlung_ab_tage));
@@ -74,6 +76,8 @@ for (const k of Object.keys(CFG.zuschlaege_pro_nacht)) h += '<div><label>' + k +
 for (const k of Object.keys(CFG.einmalig)) if (k !== "Endreinigung") h += '<div><label>' + k + ' (Anzahl)</label><input type="number" min="0" value="0" data-e="' + k + '"></div>';
 $("extras").innerHTML = h;
 $("rabatte").innerHTML = (CFG.rabatte || []).map(r => "<option>" + r.name + "</option>").join("");
+if (!$("bdatum").value) $("bdatum").value = iso(new Date());
+$("bezahlt").onchange = () => $("bwrap").classList.toggle("hidden", !$("bezahlt").checked);
 document.querySelectorAll("#new input,#new select").forEach(e => e.addEventListener("input", preview));
 }
 function readForm() {
@@ -82,16 +86,18 @@ document.querySelectorAll("[data-x]").forEach(e => extras[e.dataset.x] = Number(
 document.querySelectorAll("[data-e]").forEach(e => einm[e.dataset.e] = Number(e.value) || 0);
 return {extras, einm, rab: [...$("rabatte").selectedOptions].map(o => o.value), rfrei: Number($("rfrei").value) || 0, kurz: $("kurz").checked};
 }
-const row4 = p => "<tr><td>" + p[0] + '</td><td class="r">' + p[1] + '</td><td class="r">' + eur(p[2]) + '</td><td class="r">' + eur(p[3]) + "</td></tr>";
+const row3 = p => "<tr><td>" + p[0] + '</td><td>' + p[4] + '</td><td class="r">' + eur(p[3]) + "</td></tr>";
 function preview() {
 const el = $("preview");
 if (!$("von").value || !$("bis").value) { el.textContent = "Bitte Zeitraum wählen."; return; }
 try {
-const f = readForm(), r = calc(pd($("von").value), pd($("bis").value), f.extras, f.einm, f.rab, f.rfrei, f.kurz, new Date());
-el.innerHTML = "<table>" + r.pos.map(row4).join("") + r.ein.map(row4).join("") +
-"<tr><th>Gesamt (" + r.n + ' Nächte)</th><th></th><th></th><th class="r">' + eur(r.gesamt) + "</th></tr>" +
-"<tr><td>" + (r.vollSofort ? "Gesamtbetrag, sofort fällig" : "Anzahlung " + CFG.zahlung.anzahlung_prozent + " %, fällig bei Buchung") + '</td><td></td><td></td><td class="r">' + eur(r.vollSofort ? r.gesamt : r.anz) + "</td></tr>" +
-(r.vollSofort ? "" : "<tr><td>Restbetrag, fällig bis " + dstr(r.restDatum) + '</td><td></td><td></td><td class="r">' + eur(r.rest) + "</td></tr>") + "</table>";
+const f = readForm(), r = calc(pd($("von").value), pd($("bis").value), f.extras, f.einm, f.rab, f.rfrei, f.kurz, new Date()), paid = $("bezahlt").checked;
+const zeile = (a, b) => "<tr><td>" + a + '</td><td></td><td class="r">' + eur(b) + "</td></tr>";
+el.innerHTML = "<table>" + r.pos.map(row3).join("") + r.ein.map(row3).join("") +
+"<tr><th>Gesamt (" + r.n + ' Nächte)</th><th></th><th class="r">' + eur(r.gesamt) + "</th></tr>" +
+(paid ? zeile("Bereits bezahlt", r.gesamt) + zeile("Offener Betrag", 0) :
+zeile(r.vollSofort ? "Gesamtbetrag, sofort fällig" : "Anzahlung " + CFG.zahlung.anzahlung_prozent + " %, fällig bei Buchung", r.vollSofort ? r.gesamt : r.anz) +
+(r.vollSofort ? "" : zeile("Restbetrag, fällig bis " + dstr(r.restDatum), r.rest))) + "</table>";
 } catch (e) { el.innerHTML = '<span class="err">' + e.message + "</span>"; }
 }
 function fmtNr(jahr, lfd) {
@@ -102,68 +108,102 @@ const msg = $("nmsg"); msg.className = ""; msg.textContent = "";
 try {
 const von = pd($("von").value), bis = pd($("bis").value), name = $("gname").value.trim();
 if (!name) throw new Error("Bitte einen Namen eingeben.");
+const link = $("zlink").value.trim();
+if (link && !/^https?:[/][/]/i.test(link)) throw new Error("Der Zahlungslink muss mit https:// beginnen.");
+const bez = $("bezahlt").checked;
+if (bez && !$("bdatum").value) throw new Error("Bitte das Zahlungsdatum angeben.");
+const paid = bez ? pd($("bdatum").value) : null;
 const f = readForm(), heute = new Date(), r = calc(von, bis, f.extras, f.einm, f.rab, f.rfrei, f.kurz, heute), jahr = heute.getFullYear();
 const {data: lfd, error: e1} = await sb.rpc("next_invoice_number", {p_jahr: jahr}); if (e1) throw e1;
 const nr = fmtNr(jahr, lfd);
 const gast = {anrede: $("anrede").value, name, strasse: $("gstr").value.trim(), ort: $("gort").value.trim()};
+const voll = r.vollSofort || bez;
 const {error: e2} = await sb.from("invoices").insert({nr, jahr, lfd, rechnungsdatum: iso(heute), gast, von: iso(von), bis: iso(bis), naechte: r.n,
-daten: {positionen: r.pos, einmalig: r.ein, uebernachtung: r.uebern, zusatz: r.zusatz, voll_sofort: r.vollSofort},
-gesamt: r.gesamt, anzahlung: r.vollSofort ? r.gesamt : r.anz, restzahlung: r.vollSofort ? 0 : r.rest, rest_zahlbar_bis: r.vollSofort ? null : iso(r.restDatum)});
+daten: {positionen: r.pos, einmalig: r.ein, uebernachtung: r.uebern, zusatz: r.zusatz, voll_sofort: r.vollSofort, zahlungslink: link || null, bezahlt_am: paid ? iso(paid) : null},
+gesamt: r.gesamt, anzahlung: voll ? r.gesamt : r.anz, restzahlung: voll ? 0 : r.rest, rest_zahlbar_bis: voll ? null : iso(r.restDatum), status: bez ? "bezahlt" : "offen"});
 if (e2) throw e2;
-makePdf(gast, von, bis, r, nr, heute);
+makePdf(gast, von, bis, r, nr, heute, {link: bez ? "" : link, paid});
 msg.className = "ok"; msg.textContent = "Rechnung " + nr + " erstellt.";
 } catch (e) { msg.className = "err"; msg.textContent = e.message || String(e); }
 }
-function makePdf(g, von, bis, r, nr, datum) {
-const {jsPDF} = window.jspdf, doc = new jsPDF({unit: "mm", format: "a4"}), C = CFG, v = C.vermieter, w = C.wohnung, z = C.zahlung, L = 20, R = 190;
+function makePdf(g, von, bis, r, nr, datum, opt) {
+const {jsPDF} = window.jspdf, doc = new jsPDF({unit: "mm", format: "a4"}), C = CFG, v = C.vermieter, w = C.wohnung, z = C.zahlung, L = 20, R = 190, BOT = 272;
+const paid = opt && opt.paid, link = opt && opt.link;
 let y = 14;
+const room = h => { if (y + h > BOT) { doc.addPage(); y = 20; } };
 const lh = 60 * window.LOGO_H / window.LOGO_W;
 doc.addImage(window.LOGO, "PNG", L, y, 60, lh); y += lh + 6;
 doc.setFontSize(8).setTextColor(120).text(v.name + " | " + v.strasse + " | " + v.ort, L, y); doc.setTextColor(0).setFontSize(10); y += 6;
 const emp = [g.anrede, g.name, g.strasse, g.ort].filter(Boolean), ab = [v.name, v.strasse, v.ort, "Tel. " + v.telefon, "Mobil " + v.mobil, v.email];
-emp.forEach((t, i) => doc.text(t, L, y + i * 5)); ab.forEach((t, i) => doc.text(t, 125, y + i * 5)); y += Math.max(emp.length, ab.length) * 5 + 8;
-doc.setFont("helvetica", "bold").setFontSize(14).text("Buchungsbestätigung & Rechnung", L, y); y += 8;
-doc.setFontSize(10).text("Rechnungsnummer: " + nr, L, y); doc.setFont("helvetica", "normal").text("Datum: " + dstr(datum), 125, y); y += 8;
+emp.forEach((t, i) => doc.text(t, L, y + i * 5)); ab.forEach((t, i) => doc.text(t, 125, y + i * 5)); y += Math.max(emp.length, ab.length) * 5 + 20;
+doc.setFont("helvetica", "bold").setFontSize(14).text("Buchungsbestätigung & Rechnung", L, y); y += 9;
+doc.setFontSize(10).text("Rechnungsnummer: " + nr, L, y); doc.setFont("helvetica", "normal").text("Datum: " + dstr(datum), 125, y); y += 9;
 const gr = g.anrede === "Herr" ? "Sehr geehrter Herr " + g.name : g.anrede === "Frau" ? "Sehr geehrte Frau " + g.name : "Sehr geehrte Damen und Herren";
-doc.text(gr + ",", L, y); y += 6;
-doc.text(doc.splitTextToSize("gerne bestätigen wir Ihnen die Buchung über den unten genannten Zeitraum. Im Folgenden erhalten Sie die Rechnung für Ihren Aufenthalt bei uns.", R - L), L, y); y += 12;
+doc.text(gr + ",", L, y); y += 7;
+doc.text(doc.splitTextToSize("gerne bestätigen wir Ihnen die Buchung über den unten genannten Zeitraum. Im Folgenden erhalten Sie die Rechnung für Ihren Aufenthalt bei uns.", R - L), L, y); y += 14;
 [["Adresse der Ferienwohnung", w.adresse], ["Anreise", dstr(von) + " ab " + w.anreise_zeit], ["Abreise", dstr(bis) + " bis " + w.abreise_zeit]].forEach(([a, b]) => {
-doc.setFont("helvetica", "bold").text(a, L, y); doc.setFont("helvetica", "normal").text(b, L + 60, y); y += 5.5;
+doc.setFont("helvetica", "bold").text(a, L, y); doc.setFont("helvetica", "normal").text(b, L + 60, y); y += 6;
 });
-y += 4;
-const head = (a, b, c, d) => {
-doc.setFillColor(240, 240, 240).rect(L, y - 4.5, R - L, 6.5, "F"); doc.setFont("helvetica", "bold");
-doc.text(a, L + 1, y); doc.text(b, 125, y, {align: "right"}); doc.text(c, 158, y, {align: "right"}); doc.text(d, R - 1, y, {align: "right"});
-y += 6; doc.setFont("helvetica", "normal");
+y += 8;
+const head = (a, b, c) => {
+room(16); doc.setFillColor(240, 240, 240).rect(L, y - 4.5, R - L, 6.5, "F"); doc.setFont("helvetica", "bold");
+doc.text(a, L + 1, y); if (b) doc.text(b, 108, y); doc.text(c, R - 1, y, {align: "right"});
+y += 7; doc.setFont("helvetica", "normal");
 };
-const line = (a, b, c, d, bold) => {
+const line = (a, b, c, bold) => {
+const al = doc.splitTextToSize(a, 84); room(al.length * 5 + 3);
 if (bold) doc.setFont("helvetica", "bold");
-doc.text(a, L + 1, y); if (b !== "") doc.text(String(b), 125, y, {align: "right"}); if (c !== "") doc.text(c, 158, y, {align: "right"});
-doc.text(d, R - 1, y, {align: "right"}); doc.setFont("helvetica", "normal"); y += 5.5;
+doc.text(al, L + 1, y); if (b) doc.text(b, 108, y); doc.text(c, R - 1, y, {align: "right"});
+doc.setFont("helvetica", "normal"); y += al.length * 5 + 1.5;
 };
-head("Pro Nacht", "Menge", "Einzelpreis", "Gesamt");
-r.pos.forEach(p => line(p[0], p[1], eur(p[2]), eur(p[3])));
-doc.line(L, y - 3.5, R, y - 3.5); line("Übernachtungspreis", "", "", eur(r.uebern), true); y += 2;
-head("Einmalige Kosten", "Anzahl", "Einzelpreis", "Gesamt");
-r.ein.forEach(p => line(p[0], p[1], eur(p[2]), eur(p[3])));
-line("Zusatzkosten", "", "", eur(r.zusatz), true); doc.line(L, y - 3.5, R, y - 3.5);
-line("Gesamtrechnungsbetrag", "", "", eur(r.gesamt), true);
-if (r.vollSofort) line("Zahlbetrag (sofort fällig)", "", "", eur(r.gesamt), true);
-else { line("Anzahlung " + z.anzahlung_prozent + " % (fällig bei Buchung)", "", "", eur(r.anz), true); line("Restbetrag (fällig bis " + dstr(r.restDatum) + ")", "", "", eur(r.rest)); }
-y += 1;
-doc.setFontSize(8).setTextColor(120).text(C.hinweis_steuer, L, y); doc.setTextColor(0).setFontSize(10); y += 6;
+head("Leistung", "Berechnung", "Betrag");
+r.pos.forEach(p => line(p[0], p[4], eur(p[3])));
+doc.line(L, y - 3.5, R, y - 3.5); line("Übernachtungspreis", "", eur(r.uebern), true); y += 2;
+head("Einmalige Kosten", "", "Betrag");
+r.ein.forEach(p => line(p[0], p[4], eur(p[3])));
+line("Zusatzkosten", "", eur(r.zusatz), true); doc.line(L, y - 3.5, R, y - 3.5);
+line("Gesamtrechnungsbetrag", "", eur(r.gesamt), true);
+if (paid) { line("Bereits bezahlt am " + dstr(paid), "", eur(r.gesamt)); line("Offener Betrag", "", eur(0), true); }
+else if (r.vollSofort) line("Zahlbetrag (sofort fällig)", "", eur(r.gesamt), true);
+else { line("Anzahlung " + z.anzahlung_prozent + " % (fällig bei Buchung)", "", eur(r.anz), true); line("Restbetrag (fällig bis " + dstr(r.restDatum) + ")", "", eur(r.rest)); }
+y += 7;
+if (paid) {
+const t = doc.splitTextToSize("Der Rechnungsbetrag wurde bereits vollständig beglichen. Es ist keine weitere Zahlung erforderlich. Vielen Dank!", R - L);
+room(t.length * 5 + 4); doc.setFont("helvetica", "bold"); doc.text(t, L, y); doc.setFont("helvetica", "normal"); y += t.length * 5 + 4;
+} else {
 const pay = r.vollSofort
-? "Bitte überweisen Sie den Gesamtbetrag von " + eur(r.gesamt) + " innerhalb von " + z.anzahlung_frist_tage + " Tagen nach Erhalt dieser Rechnung (spätestens vor Anreise) auf das unten genannte Bankkonto."
-: "Bei Buchung fällig: " + z.anzahlung_prozent + " % Anzahlung = " + eur(r.anz) + ". Bitte überweisen Sie den Anzahlungsbetrag innerhalb von " + z.anzahlung_frist_tage + " Tagen nach Erhalt dieser Rechnung auf das unten genannte Bankkonto. Der Restbetrag in Höhe von " + eur(r.rest) + " ist bis zum " + dstr(r.restDatum) + " zu zahlen.";
-const pl = doc.splitTextToSize(pay, R - L); doc.text(pl, L, y); y += pl.length * 4.8 + 4;
-const bank = [["Bank:", z.bank], ["Kontoinhaber:", z.kontoinhaber], ["IBAN:", z.iban], ["BIC:", z.bic]]; if (z.paypal) bank.push(["oder PayPal:", z.paypal]);
-doc.rect(L, y - 4, 110, bank.length * 5.2 + 2); bank.forEach(([a, b], i) => { doc.text(a, L + 2, y + i * 5.2); doc.text(b, L + 35, y + i * 5.2); }); y += bank.length * 5.2 + 6;
-doc.text("Mit freundlichen Grüßen", L, y); doc.text(v.name, L, y + 5); y += 14;
-const sl = doc.splitTextToSize(C.storno_einleitung, R - L), need = 8 + sl.length * 4.5 + C.storno.length * 5;
-if (y + need > 285) { doc.addPage(); y = 20; }
-doc.setFont("helvetica", "bold").text("Stornierungsbedingungen", L, y); y += 5.5; doc.setFont("helvetica", "normal").setFontSize(9);
-doc.text(sl, L, y); y += sl.length * 4.5 + 1;
-C.storno.forEach(([a, b]) => { doc.text(a, L, y); doc.text(b, L + 85, y); y += 5; });
+? "Bitte überweisen Sie den Gesamtbetrag von " + eur(r.gesamt) + " innerhalb von " + z.anzahlung_frist_tage + " Tagen nach Erhalt dieser Rechnung (spätestens vor Anreise) auf folgendes Konto:"
+: "Bei Buchung fällig: " + z.anzahlung_prozent + " % Anzahlung = " + eur(r.anz) + ". Bitte überweisen Sie den Anzahlungsbetrag innerhalb von " + z.anzahlung_frist_tage + " Tagen nach Erhalt dieser Rechnung auf folgendes Konto. Der Restbetrag in Höhe von " + eur(r.rest) + " ist bis zum " + dstr(r.restDatum) + " zu zahlen.";
+const pl = doc.splitTextToSize(pay, R - L); room(pl.length * 5 + 24); doc.text(pl, L, y); y += pl.length * 5 + 5;
+doc.setFillColor(242, 246, 248).rect(L, y - 4, R - L, 14, "F"); doc.setFontSize(9);
+const rich = (parts, x, yy) => parts.forEach(([t, b]) => { doc.setFont("helvetica", b ? "bold" : "normal"); doc.text(t, x, yy); x += doc.getTextWidth(t); });
+rich([["Bankverbindung: ", 1], [z.kontoinhaber + " · " + z.bank, 0]], L + 3, y + 0.5);
+rich([["IBAN ", 1], [z.iban + " · ", 0], ["BIC ", 1], [z.bic, 0]], L + 3, y + 6);
+doc.setFont("helvetica", "normal").setFontSize(10); y += 18;
+if (link) {
+const t = doc.splitTextToSize("Sie können den Betrag auch bequem per Kreditkarte zahlen:", R - L); room(t.length * 5 + 12);
+doc.text(t, L, y); y += t.length * 5 + 1;
+doc.setFontSize(9).setTextColor(31, 111, 139); doc.textWithLink(link, L, y, {url: link});
+doc.line(L, y + 0.8, L + doc.getTextWidth(link), y + 0.8); doc.setTextColor(0).setFontSize(10); y += 10;
+}
+}
+room(30); y += 4;
+doc.text("Mit freundlichen Grüßen", L, y); doc.text(v.name, L, y + 5); y += 16;
+doc.setFontSize(9);
+const sl = doc.splitTextToSize(C.storno_einleitung, R - L), rules = C.storno.map(s => doc.splitTextToSize(s[0] + ": " + s[1], R - L)), hn = C.storno_hinweis ? doc.splitTextToSize(C.storno_hinweis, R - L) : [];
+const need = 9 + sl.length * 4.8 + rules.reduce((a, t) => a + t.length * 4.8, 0) + (hn.length ? hn.length * 4.8 + 3 : 0);
+room(need);
+doc.setFont("helvetica", "bold").setFontSize(10).text("Stornierungsbedingungen", L, y); y += 5.5; doc.setFont("helvetica", "normal").setFontSize(9);
+doc.text(sl, L, y); y += sl.length * 4.8 + 1.5;
+rules.forEach(t => { doc.text(t, L, y); y += t.length * 4.8; });
+if (hn.length) { y += 3; doc.text(hn, L, y); }
+const N = doc.getNumberOfPages();
+for (let i = 1; i <= N; i++) {
+doc.setPage(i); doc.setFont("helvetica", "normal").setFontSize(7.5).setTextColor(120);
+doc.text(doc.splitTextToSize([w.bezeichnung, w.adresse, "Tel. " + v.telefon, v.email].filter(Boolean).join(" · "), R - L), 105, 280, {align: "center"});
+doc.text(C.hinweis_steuer, 105, 285, {align: "center"});
+doc.text("Seite " + i + " von " + N, R, 291, {align: "right"});
+}
 doc.save(nr + ".pdf");
 }
 async function loadList() {
@@ -198,9 +238,9 @@ ta("s_ein", "Einmalige Kosten (Name = Preis, Endreinigung muss vorhanden sein)",
 '<div class="g">' + f("s_kn", "Kurzaufenthalt: bis max. Nächte", C.kurzaufenthalt.max_naechte) + f("s_kz", "Kurzaufenthalt: Zuschlag (€)", C.kurzaufenthalt.zuschlag) + "</div>" +
 H("Rabatte") + ta("s_rab", "Eine pro Zeile: Name | art (prozent, pro_nacht, pauschal) | Wert | min. Nächte | automatisch (ja/nein) | Zeitraum von | bis (optional, TT.MM.)",
 (C.rabatte || []).map(r => [r.name, r.art, r.wert, r.min_naechte || 0, r.automatisch ? "ja" : "nein", r.zeitraum_von || "", r.zeitraum_bis || ""].join(" | ")).join(NL)) +
-H("Zahlung") + '<div class="g">' + f("s_bank", "Bank", z.bank) + f("s_inh", "Kontoinhaber", z.kontoinhaber) + f("s_iban", "IBAN", z.iban) + f("s_bic", "BIC", z.bic) + f("s_pp", "PayPal", z.paypal) +
+H("Zahlung") + '<div class="g">' + f("s_bank", "Bank", z.bank) + f("s_inh", "Kontoinhaber", z.kontoinhaber) + f("s_iban", "IBAN", z.iban) + f("s_bic", "BIC", z.bic) +
 f("s_ap", "Anzahlung in %", z.anzahlung_prozent) + f("s_am", "Anzahlung nur, wenn Anreise mehr als X Tage entfernt", z.anzahlung_ab_tage == null ? 14 : z.anzahlung_ab_tage) + f("s_af", "Frist Anzahlung (Tage)", z.anzahlung_frist_tage) + f("s_rv", "Restzahlung X Tage vor Anreise", z.rest_vor_anreise_tage) + "</div>" +
-H("Stornierung") + f("s_stei", "Einleitungstext", C.storno_einleitung) + ta("s_sto", "Regeln (eine pro Zeile: Zeitraum | Kosten)", C.storno.map(s => s.join(" | ")).join(NL)) +
+H("Stornierung") + f("s_stei", "Einleitungstext", C.storno_einleitung) + ta("s_sto", "Regeln (eine pro Zeile: Zeitraum | Kosten)", C.storno.map(s => s.join(" | ")).join(NL)) + f("s_sth", "Hinweis unter den Regeln", C.storno_hinweis) +
 H("Vermieter und Wohnung") + '<div class="g">' + f("s_vn", "Name", v.name) + f("s_vs", "Straße", v.strasse) + f("s_vo", "PLZ Ort", v.ort) + f("s_vt", "Telefon", v.telefon) + f("s_vm", "Mobil", v.mobil) + f("s_ve", "E-Mail", v.email) +
 f("s_wb", "Name Ferienwohnung", w.bezeichnung) + f("s_wa", "Adresse Ferienwohnung", w.adresse) + f("s_an", "Anreise ab", w.anreise_zeit) + f("s_ab", "Abreise bis", w.abreise_zeit) + "</div>" +
 f("s_tax", "Steuerhinweis", C.hinweis_steuer) + f("s_nrf", "Rechnungsnummer-Format ({jahr}, {lfd:03d})", C.rechnungsnummer_format);
@@ -226,9 +266,9 @@ return r;
 const nc = Object.assign({}, CFG, {
 standard: {name: "Standard", preis: num("s_std")}, uebernachtung_text: $("s_ues").value, saisons,
 zuschlaege_pro_nacht: pairs($("s_zus").value), einmalig: ein, kurzaufenthalt: {max_naechte: num("s_kn"), zuschlag: num("s_kz")}, rabatte,
-zahlung: {bank: $("s_bank").value, kontoinhaber: $("s_inh").value, iban: $("s_iban").value, bic: $("s_bic").value, paypal: $("s_pp").value,
+zahlung: {bank: $("s_bank").value, kontoinhaber: $("s_inh").value, iban: $("s_iban").value, bic: $("s_bic").value,
 anzahlung_prozent: num("s_ap"), anzahlung_ab_tage: num("s_am"), anzahlung_frist_tage: num("s_af"), rest_vor_anreise_tage: num("s_rv")},
-storno_einleitung: $("s_stei").value, storno: lines($("s_sto").value).map(l => l.split("|").map(s => s.trim())),
+storno_einleitung: $("s_stei").value, storno: lines($("s_sto").value).map(l => l.split("|").map(s => s.trim())), storno_hinweis: $("s_sth").value,
 vermieter: {name: $("s_vn").value, strasse: $("s_vs").value, ort: $("s_vo").value, telefon: $("s_vt").value, mobil: $("s_vm").value, email: $("s_ve").value},
 wohnung: {bezeichnung: $("s_wb").value, adresse: $("s_wa").value, anreise_zeit: $("s_an").value, abreise_zeit: $("s_ab").value},
 hinweis_steuer: $("s_tax").value, rechnungsnummer_format: $("s_nrf").value});
