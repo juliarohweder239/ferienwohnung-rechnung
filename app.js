@@ -13,6 +13,7 @@ const cmp = (a, b) => a[0] - b[0] || a[1] - b[1];
 const r2 = x => Math.round((x + Number.EPSILON) * 100) / 100;
 const nn = n => n === 1 ? "Nacht" : "Nächte";
 const webOf = v => v.website == null ? "www.ferienwohnung-rohweder.de" : v.website;
+const quellenOf = C => C.buchungsquellen || [{name: "Traumferienwohnung.de", aufschlag_prozent: 5}];
 function inRange(d, von, bis) {
 const x = [d.getMonth() + 1, d.getDate()], a = md(von), b = md(bis);
 return cmp(a, b) <= 0 ? (cmp(x, a) >= 0 && cmp(x, b) < 0) : (cmp(x, a) >= 0 || cmp(x, b) < 0);
@@ -22,12 +23,13 @@ for (const s of CFG.saisons) if (s.zeitraeume.some(z => inRange(d, z.von, z.bis)
 return [CFG.standard.name, CFG.standard.preis];
 }
 // Positionen: [Name, Menge, Einzelpreis, Gesamt, Berechnungstext]
-function calc(von, bis, extras, einm, rabNames, rfrei, kurz, rdatum) {
+function calc(von, bis, extras, einm, rabNames, rfrei, kurz, rdatum, quelle) {
 const n = Math.round((bis - von) / 864e5);
 if (!(n >= 1)) throw new Error("Abreise muss nach Anreise liegen.");
 const gr = {};
 for (let i = 0; i < n; i++) { const [nm, p] = seasonFor(addDays(von, i)); (gr[nm] = gr[nm] || {n: 0, p}).n++; }
 const pos = Object.entries(gr).map(([nm, g]) => [CFG.uebernachtung_text.replace("{name}", nm), g.n, g.p, g.n * g.p, g.n + " " + nn(g.n) + " × " + eur(g.p)]);
+const nS = pos.length;
 for (const [k, a] of Object.entries(extras)) if (a > 0) { const p = CFG.zuschlaege_pro_nacht[k]; pos.push([k, a, p * n, a * p * n, a + " × " + n + " " + nn(n) + " × " + eur(p)]); }
 if (kurz && n <= CFG.kurzaufenthalt.max_naechte) pos.push(["Zuschlag Kurzaufenthalt", 1, CFG.kurzaufenthalt.zuschlag, CFG.kurzaufenthalt.zuschlag, "pauschal"]);
 const basis = pos.reduce((s, p) => s + p[3], 0);
@@ -42,6 +44,8 @@ else if (r.art === "pro_nacht") pos.push([r.name, n, -r.wert, -r.wert * n, n + "
 else pos.push([r.name, 1, -r.wert, -r.wert, "pauschal"]);
 }
 if (rfrei > 0) { const b = -r2(basis * rfrei / 100); pos.push([rfrei + " % Rabatt", 1, b, b, rfrei + " % auf " + eur(basis)]); }
+const q = quelle ? quellenOf(CFG).find(x => x.name === quelle) : null;
+if (q && q.aufschlag_prozent > 0) { const nb = pos.slice(0, nS).reduce((s, p) => s + p[3], 0), a = r2(nb * q.aufschlag_prozent / 100); pos.splice(nS, 0, ["Aufschlag " + q.name, 1, a, a, q.aufschlag_prozent + " % auf " + eur(nb)]); }
 const uebern = r2(pos.reduce((s, p) => s + p[3], 0));
 const ein = [["Endreinigung", 1, CFG.einmalig.Endreinigung, CFG.einmalig.Endreinigung, "einmalig"]];
 for (const [k, a] of Object.entries(einm)) if (a > 0) ein.push([k, a, CFG.einmalig[k], a * CFG.einmalig[k], a + " × " + eur(CFG.einmalig[k])]);
@@ -77,6 +81,7 @@ for (const k of Object.keys(CFG.zuschlaege_pro_nacht)) h += '<div><label>' + k +
 for (const k of Object.keys(CFG.einmalig)) if (k !== "Endreinigung") h += '<div><label>' + k + ' (Anzahl)</label><input type="number" min="0" value="0" data-e="' + k + '"></div>';
 $("extras").innerHTML = h;
 $("rabatte").innerHTML = (CFG.rabatte || []).map(r => "<option>" + r.name + "</option>").join("");
+$("quelle").innerHTML = '<option value="">Direktbuchung</option>' + quellenOf(CFG).map(q => "<option>" + q.name + "</option>").join("");
 if (!$("bdatum").value) $("bdatum").value = iso(new Date());
 $("bezahlt").onchange = () => $("bwrap").classList.toggle("hidden", !$("bezahlt").checked);
 document.querySelectorAll("#new input,#new select").forEach(e => e.addEventListener("input", preview));
@@ -85,14 +90,14 @@ function readForm() {
 const extras = {}, einm = {};
 document.querySelectorAll("[data-x]").forEach(e => extras[e.dataset.x] = Number(e.value) || 0);
 document.querySelectorAll("[data-e]").forEach(e => einm[e.dataset.e] = Number(e.value) || 0);
-return {extras, einm, rab: [...$("rabatte").selectedOptions].map(o => o.value), rfrei: Number($("rfrei").value) || 0, kurz: $("kurz").checked};
+return {extras, einm, rab: [...$("rabatte").selectedOptions].map(o => o.value), rfrei: Number($("rfrei").value) || 0, kurz: $("kurz").checked, quelle: $("quelle").value};
 }
 const row3 = p => "<tr><td>" + p[0] + '</td><td>' + p[4] + '</td><td class="r">' + eur(p[3]) + "</td></tr>";
 function preview() {
 const el = $("preview");
 if (!$("von").value || !$("bis").value) { el.textContent = "Bitte Zeitraum wählen."; return; }
 try {
-const f = readForm(), r = calc(pd($("von").value), pd($("bis").value), f.extras, f.einm, f.rab, f.rfrei, f.kurz, new Date()), paid = $("bezahlt").checked;
+const f = readForm(), r = calc(pd($("von").value), pd($("bis").value), f.extras, f.einm, f.rab, f.rfrei, f.kurz, new Date(), f.quelle), paid = $("bezahlt").checked;
 const zeile = (a, b) => "<tr><td>" + a + '</td><td></td><td class="r">' + eur(b) + "</td></tr>";
 el.innerHTML = "<table>" + r.pos.map(row3).join("") + r.ein.map(row3).join("") +
 "<tr><th>Gesamt (" + r.n + ' Nächte)</th><th></th><th class="r">' + eur(r.gesamt) + "</th></tr>" +
@@ -114,13 +119,13 @@ if (link && !/^https?:[/][/]/i.test(link)) throw new Error("Der Zahlungslink mus
 const bez = $("bezahlt").checked;
 if (bez && !$("bdatum").value) throw new Error("Bitte das Zahlungsdatum angeben.");
 const paid = bez ? pd($("bdatum").value) : null;
-const f = readForm(), heute = new Date(), r = calc(von, bis, f.extras, f.einm, f.rab, f.rfrei, f.kurz, heute), jahr = heute.getFullYear();
+const f = readForm(), heute = new Date(), r = calc(von, bis, f.extras, f.einm, f.rab, f.rfrei, f.kurz, heute, f.quelle), jahr = heute.getFullYear();
 const {data: lfd, error: e1} = await sb.rpc("next_invoice_number", {p_jahr: jahr}); if (e1) throw e1;
 const nr = fmtNr(jahr, lfd);
 const gast = {anrede: $("anrede").value, name, strasse: $("gstr").value.trim(), ort: $("gort").value.trim()};
 const voll = r.vollSofort || bez;
 const {error: e2} = await sb.from("invoices").insert({nr, jahr, lfd, rechnungsdatum: iso(heute), gast, von: iso(von), bis: iso(bis), naechte: r.n,
-daten: {positionen: r.pos, einmalig: r.ein, uebernachtung: r.uebern, zusatz: r.zusatz, voll_sofort: r.vollSofort, zahlungslink: link || null, bezahlt_am: paid ? iso(paid) : null},
+daten: {positionen: r.pos, einmalig: r.ein, uebernachtung: r.uebern, zusatz: r.zusatz, voll_sofort: r.vollSofort, zahlungslink: link || null, bezahlt_am: paid ? iso(paid) : null, quelle: f.quelle || "Direktbuchung"},
 gesamt: r.gesamt, anzahlung: voll ? r.gesamt : r.anz, restzahlung: voll ? 0 : r.rest, rest_zahlbar_bis: voll ? null : iso(r.restDatum), status: bez ? "bezahlt" : "offen"});
 if (e2) throw e2;
 makePdf(gast, von, bis, r, nr, heute, {link: bez ? "" : link, paid});
@@ -219,9 +224,9 @@ document.querySelectorAll("select[data-id]").forEach(s => s.addEventListener("ch
 }
 async function setStatus(id, s) { await sb.from("invoices").update({status: s}).eq("id", id); }
 function exportCsv() {
-const rows = [["RE-Nr", "Rechnungsdatum", "Gast", "Von", "Bis", "Nächte", "Endpreis", "Anzahlung", "Restzahlung", "Rest zahlbar bis", "Status"]];
+const rows = [["RE-Nr", "Rechnungsdatum", "Gast", "Von", "Bis", "Nächte", "Endpreis", "Anzahlung", "Restzahlung", "Rest zahlbar bis", "Status", "Buchungsquelle"]];
 const c = x => String(x).replace(".", ",");
-(window.INV || []).forEach(i => rows.push([i.nr, dstr(pd(i.rechnungsdatum)), i.gast.name, dstr(pd(i.von)), dstr(pd(i.bis)), i.naechte, c(i.gesamt), c(i.anzahlung), c(i.restzahlung), i.rest_zahlbar_bis ? dstr(pd(i.rest_zahlbar_bis)) : "", i.status]));
+(window.INV || []).forEach(i => rows.push([i.nr, dstr(pd(i.rechnungsdatum)), i.gast.name, dstr(pd(i.von)), dstr(pd(i.bis)), i.naechte, c(i.gesamt), c(i.anzahlung), c(i.restzahlung), i.rest_zahlbar_bis ? dstr(pd(i.rest_zahlbar_bis)) : "", i.status, (i.daten && i.daten.quelle) || "Direktbuchung"]));
 const csv = String.fromCharCode(0xFEFF) + rows.map(r => r.map(x => '"' + String(x).replace(/"/g, '""') + '"').join(";")).join(NL);
 const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv"})); a.download = "rechnungen.csv"; a.click();
 }
@@ -237,6 +242,7 @@ ta("s_sais", "Saisons (eine pro Zeile: Name | Preis | von-bis; von-bis). Datum o
 ta("s_zus", "Zuschläge pro Nacht (Name = Preis)", Object.entries(C.zuschlaege_pro_nacht).map(([k, p]) => k + " = " + p).join(NL)) +
 ta("s_ein", "Einmalige Kosten (Name = Preis, Endreinigung muss vorhanden sein)", Object.entries(C.einmalig).map(([k, p]) => k + " = " + p).join(NL)) +
 '<div class="g">' + f("s_kn", "Kurzaufenthalt: bis max. Nächte", C.kurzaufenthalt.max_naechte) + f("s_kz", "Kurzaufenthalt: Zuschlag (€)", C.kurzaufenthalt.zuschlag) + "</div>" +
+H("Buchungsquellen") + ta("s_quel", "Portale mit Aufschlag (eine pro Zeile: Name | Aufschlag in % auf den Übernachtungspreis). Direktbuchung ist immer ohne Aufschlag.", quellenOf(C).map(q => q.name + " | " + q.aufschlag_prozent).join(NL)) +
 H("Rabatte") + ta("s_rab", "Eine pro Zeile: Name | art (prozent, pro_nacht, pauschal) | Wert | min. Nächte | automatisch (ja/nein) | Zeitraum von | bis (optional, TT.MM.)",
 (C.rabatte || []).map(r => [r.name, r.art, r.wert, r.min_naechte || 0, r.automatisch ? "ja" : "nein", r.zeitraum_von || "", r.zeitraum_bis || ""].join(" | ")).join(NL)) +
 H("Zahlung") + '<div class="g">' + f("s_bank", "Bank", z.bank) + f("s_inh", "Kontoinhaber", z.kontoinhaber) + f("s_iban", "IBAN", z.iban) + f("s_bic", "BIC", z.bic) +
@@ -264,8 +270,13 @@ const r = {name: n, art: a, wert: Number(wt.replace(",", ".")), min_naechte: Num
 if (zv && zb) { md(zv); md(zb); r.zeitraum_von = zv; r.zeitraum_bis = zb; }
 return r;
 });
+const buchungsquellen = lines($("s_quel").value).map(l => {
+const [n, p] = l.split("|").map(s => s.trim()), pr = Number(String(p || "0").replace(",", "."));
+if (!n || Number.isNaN(pr)) throw new Error("Ungültige Buchungsquelle: " + l);
+return {name: n, aufschlag_prozent: pr};
+});
 const nc = Object.assign({}, CFG, {
-standard: {name: "Standard", preis: num("s_std")}, uebernachtung_text: $("s_ues").value, saisons,
+standard: {name: "Standard", preis: num("s_std")}, uebernachtung_text: $("s_ues").value, saisons, buchungsquellen,
 zuschlaege_pro_nacht: pairs($("s_zus").value), einmalig: ein, kurzaufenthalt: {max_naechte: num("s_kn"), zuschlag: num("s_kz")}, rabatte,
 zahlung: {bank: $("s_bank").value, kontoinhaber: $("s_inh").value, iban: $("s_iban").value, bic: $("s_bic").value,
 anzahlung_prozent: num("s_ap"), anzahlung_ab_tage: num("s_am"), anzahlung_frist_tage: num("s_af"), rest_vor_anreise_tage: num("s_rv")},
